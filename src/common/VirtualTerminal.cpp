@@ -21,6 +21,7 @@
 #include <QString>
 
 #include "VirtualTerminal.h"
+#include "CustomSignalHandler.h"
 
 #include <errno.h>
 #include <string.h>
@@ -37,13 +38,13 @@
 
 namespace SDDM {
     namespace VirtualTerminal {
-        static void onAcquireDisplay(int signal) {
+        static void onAcquireDisplay() {
             int fd = open("/dev/tty0", O_RDWR | O_NOCTTY);
             ioctl(fd, VT_RELDISP, VT_ACKACQ);
             close(fd);
         }
 
-        static void onReleaseDisplay(int signal) {
+        static void onReleaseDisplay() {
             int fd = open("/dev/tty0", O_RDWR | O_NOCTTY);
             ioctl(fd, VT_RELDISP, 1);
             close(fd);
@@ -62,8 +63,15 @@ namespace SDDM {
                 ok = false;
             }
 
-            signal(RELEASE_DISPLAY_SIGNAL, onReleaseDisplay);
-            signal(ACQUIRE_DISPLAY_SIGNAL, onAcquireDisplay);
+            CustomSignalHandler::self()->addSignal(RELEASE_DISPLAY_SIGNAL);
+            CustomSignalHandler::self()->addSignal(ACQUIRE_DISPLAY_SIGNAL);
+            QObject::connect(CustomSignalHandler::self(), &CustomSignalHandler::signalReceived, [](int signal) {
+                if (signal == ACQUIRE_DISPLAY_SIGNAL) {
+                    onAcquireDisplay();
+                } else if (signal == RELEASE_DISPLAY_SIGNAL) {
+                    onReleaseDisplay();
+                }
+            });
 
             return ok;
         }

@@ -23,10 +23,10 @@
 #include "Configuration.h"
 #include "UserSession.h"
 #include "SafeDataStream.h"
-#include "HelperSignalHandler.h"
 
 #include "MessageHandler.h"
 #include "VirtualTerminal.h"
+#include "CustomSignalHandler.h"
 
 #include <QtCore/QTimer>
 #include <QtCore/QFile>
@@ -52,7 +52,12 @@ namespace SDDM {
             , m_session(new UserSession(this))
             , m_socket(new QLocalSocket(this)) {
         qInstallMessageHandler(HelperMessageHandler);
-        signal(SIGTERM, sigtermHandler);
+        CustomSignalHandler::self()->addSignal(SIGTERM);
+        QObject::connect(CustomSignalHandler::self(), &CustomSignalHandler::signalReceived, QCoreApplication::instance(), [](int signal) {
+            if (signal == SIGTERM) {
+                QCoreApplication::instance()->exit(-1);
+            }
+        });
 
         QTimer::singleShot(0, this, SLOT(setUp()));
     }
