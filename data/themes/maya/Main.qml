@@ -66,6 +66,43 @@ Rectangle {
   readonly property int spFontNormal  : 24
   readonly property int spFontSmall   : 16
 
+  property bool pamConversationActive : false
+  property string pamConversationUser : ""
+  property bool pamResponsePending : false
+  property string pamPendingResponse : ""
+
+  function beginPamAuthentication(username) {
+    if (!username) {
+      maya_password.enabled = false
+      maya_password_label.text = ""
+      return
+    }
+
+    pamConversationActive = true
+    pamConversationUser = username
+    maya_password.enabled = false
+    maya_password.text = ""
+    maya_password_label.text = ""
+    pamResponsePending = false
+    pamPendingResponse = ""
+    sddm.beginAuthentication(username, maya_session.index)
+  }
+
+  function submitPamResponse() {
+    if (!pamConversationActive) {
+      beginPamAuthentication(maya_username.text)
+    }
+
+    if (maya_password.enabled) {
+      maya_password.enabled = false
+      sddm.respond(maya_password.text)
+      maya_password.text = ""
+    } else {
+      pamPendingResponse = maya_password.text
+      pamResponsePending = true
+    }
+  }
+
 
   LayoutMirroring.enabled: Qt.locale().textDirection == Qt.RightToLeft
   LayoutMirroring.childrenInherit: true
@@ -84,9 +121,29 @@ Rectangle {
 
       anim_success.start()
     }
+    function onAuthenticationPrompt(message, echoOn) {
+      maya_password_label.text = message.trim().replace(/:\s*$/, "")
+      if (pamResponsePending) {
+        var response = pamPendingResponse
+        pamResponsePending = false
+        pamPendingResponse = ""
+        maya_password.enabled = false
+        maya_password.text = ""
+        sddm.respond(response)
+      } else {
+        maya_password.enabled = true
+        maya_password.text = ""
+        maya_password.forceActiveFocus()
+      }
+    }
     function onLoginFailed() {
       prompt_bg.color = failureText
       prompt_txt.text = textConstants.loginFailed
+      pamConversationActive = false
+      pamConversationUser = ""
+      pamResponsePending = false
+      pamPendingResponse = ""
+      beginPamAuthentication(maya_username.text)
 
       maya_busy.visible = false;
       maya_busy_anim.stop()
@@ -99,8 +156,6 @@ Rectangle {
 
       maya_busy.visible = false;
       maya_busy_anim.stop()
-
-      anim_failure.start()
     }
   }
 
@@ -110,8 +165,7 @@ Rectangle {
   onTryLogin : {
     maya_busy.visible = true;
     maya_busy_anim.start()
-
-    sddm.login(maya_username.text, maya_password.text, maya_session.index);
+    submitPamResponse()
   }
 
 
@@ -460,10 +514,11 @@ Rectangle {
       height  : (spUnit - (padSym * 2))
 
       Text {
+        id      : maya_password_label
         width   : parent.width
         height  : parent.height
 
-        text    : textConstants.password
+        text    : ""
         color   : accentLight
 
         font.family     : opensans_cond_light.name
@@ -482,6 +537,7 @@ Rectangle {
 
       PasswordBox {
         id      : maya_password
+        enabled : false
 
         width   : parent.width
         height  : parent.height
@@ -507,7 +563,7 @@ Rectangle {
 
         Keys.onPressed: function (event) {
           if ((event.key === Qt.Key_Return) || (event.key === Qt.Key_Enter)) {
-            maya_root.tryLogin()
+            beginPamAuthentication(maya_username.text)
 
             event.accepted = true;
           }
@@ -685,4 +741,7 @@ Rectangle {
     else
       maya_password.focus = true
   }
+
+  Component.onCompleted: beginPamAuthentication(maya_username.text)
+
 }

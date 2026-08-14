@@ -34,6 +34,42 @@ Rectangle {
     LayoutMirroring.childrenInherit: true
 
     property int sessionIndex: session.index
+    property bool pamConversationActive: false
+    property string pamConversationUser: ""
+    property bool pamResponsePending: false
+    property string pamPendingResponse: ""
+
+    function beginPamAuthentication(username) {
+        if (!username) {
+            pw_entry.enabled = false
+            prompt_text.text = ""
+            return
+        }
+
+        pamConversationActive = true
+        pamConversationUser = username
+        pw_entry.enabled = false
+        pw_entry.text = ""
+        prompt_text.text = ""
+        pamResponsePending = false
+        pamPendingResponse = ""
+        sddm.beginAuthentication(username, sessionIndex)
+    }
+
+    function submitPamResponse() {
+        if (!pamConversationActive) {
+            beginPamAuthentication(user_entry.text)
+        }
+
+        if (pw_entry.enabled) {
+            pw_entry.enabled = false
+            sddm.respond(pw_entry.text)
+            pw_entry.text = ""
+        } else {
+            pamPendingResponse = pw_entry.text
+            pamResponsePending = true
+        }
+    }
 
     TextConstants { id: textConstants }
 
@@ -42,9 +78,30 @@ Rectangle {
         function onLoginSucceeded() {
         }
         function onInformationMessage(message) {
+            prompt_text.text = message
+        }
+        function onAuthenticationPrompt(message, echoOn) {
+            prompt_text.text = message.trim().replace(/:\s*$/, "")
+            if (pamResponsePending) {
+                var response = pamPendingResponse
+                pamResponsePending = false
+                pamPendingResponse = ""
+                pw_entry.enabled = false
+                pw_entry.text = ""
+                sddm.respond(response)
+            } else {
+                pw_entry.enabled = true
+                pw_entry.text = ""
+                pw_entry.forceActiveFocus()
+            }
         }
         function onLoginFailed() {
             pw_entry.text = ""
+            pamConversationActive = false
+            pamConversationUser = ""
+            pamResponsePending = false
+            pamPendingResponse = ""
+            beginPamAuthentication(user_entry.text)
         }
     }
 
@@ -117,6 +174,13 @@ Rectangle {
                             font.pixelSize: 14
 
                             KeyNavigation.backtab: layoutBox; KeyNavigation.tab: pw_entry
+
+                            Keys.onPressed: function (event) {
+                                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    beginPamAuthentication(user_entry.text)
+                                    event.accepted = true
+                                }
+                            }
                         }
                     }
 
@@ -135,13 +199,24 @@ Rectangle {
 
                             KeyNavigation.backtab: user_entry; KeyNavigation.tab: login_button
 
+                            enabled: false
+
                             Keys.onPressed: function (event) {
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                    sddm.login(user_entry.text, pw_entry.text, sessionIndex)
+                                    submitPamResponse()
                                     event.accepted = true
                                 }
                             }
                         }
+                    }
+
+                    Text {
+                        id: prompt_text
+                        width: 180
+                        color: "#0b678c"
+                        horizontalAlignment: Text.AlignHCenter
+                        font.pixelSize: 12
+                        text: ""
                     }
                 }
 
@@ -153,7 +228,7 @@ Rectangle {
 
                     source: Qt.resolvedUrl("images/login_normal.png")
 
-                    onClicked: sddm.login(user_entry.text, pw_entry.text, sessionIndex)
+                    onClicked: submitPamResponse()
 
 		    KeyNavigation.backtab: pw_entry; KeyNavigation.tab: session
                 }
@@ -230,6 +305,8 @@ Rectangle {
             }
         }
     }
+
+    Component.onCompleted: beginPamAuthentication(user_entry.text)
 
     Rectangle {
         id: actionBar

@@ -154,6 +154,9 @@ namespace SDDM {
 
         // connect login signal
         connect(m_socketServer, &SocketServer::login, this, &Display::login);
+        connect(m_socketServer, &SocketServer::beginAuthentication, this, QOverload<QLocalSocket *, const QString &, const Session &>::of(&Display::beginAuthentication));
+        connect(m_socketServer, &SocketServer::cancelAuthentication, this, &Display::cancelAuthentication);
+        connect(m_socketServer, &SocketServer::authenticationResponse, this, &Display::authenticationResponse);
 
         // connect login result signals
         connect(this, &Display::loginFailed, m_socketServer, &SocketServer::loginFailed);
@@ -331,17 +334,106 @@ namespace SDDM {
     void Display::login(QLocalSocket *socket,
                         const QString &user, const QString &password,
                         const Session &session) {
-        m_socket = socket;
+        beginAuthentication(socket, user, password, session, true);
+    }
 
-        //the SDDM user has special privileges that skip password checking so that we can load the greeter
-        //block ever trying to log in as the SDDM user
+    void Display::beginAuthentication(QLocalSocket *socket, const QString &user, const Session &session) {
+        beginAuthentication(socket, user, QString(), session, false);
+    }
+
+    bool Display::beginAuthentication(QLocalSocket *socket, const QString &user,
+                                      const QString &password, const Session &session,
+                                      bool answerInitialRequest) {
+        // The SDDM user has special privileges that skip password checking so
+        // that the greeter can be loaded. Never allow logging in as that user.
         if (user == QLatin1String("sddm")) {
-            emit loginFailed(m_socket);
+            emit loginFailed(socket);
+            return false;
+        }
+
+        // Replacing an active PAM conversation is asynchronous. Remember the
+        // new request and start it only after the helper for the old request
+        // has really exited. This avoids a cancel/start race when users are
+        // switched quickly in the greeter.
+        if (m_auth->isActive()) {
+            m_pendingAuthentication = true;
+            m_pendingSocket = socket;
+            m_pendingUser = user;
+            m_pendingPassword = password;
+            m_pendingSession = session;
+            m_pendingInitialAuthRequest = answerInitialRequest;
+
+            if (!m_cancelingAuthentication) {
+                m_cancelingAuthentication = true;
+                m_socket = nullptr;
+                m_passPhrase.clear();
+                m_initialAuthRequest = false;
+                m_auth->stop();
+            }
+            return true;
+        }
+
+        m_socket = socket;
+        if (!startAuth(user, password, session, answerInitialRequest)) {
+            m_socket = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    bool Display::startPendingAuthentication() {
+        if (!m_pendingAuthentication)
+            return false;
+
+        const auto socket = m_pendingSocket;
+        const auto user = m_pendingUser;
+        const auto password = m_pendingPassword;
+        const auto session = m_pendingSession;
+        const bool answerInitialRequest = m_pendingInitialAuthRequest;
+
+        m_pendingAuthentication = false;
+        m_pendingSocket = nullptr;
+        m_pendingUser.clear();
+        m_pendingPassword.clear();
+        m_pendingInitialAuthRequest = false;
+
+        return beginAuthentication(socket, user, password, session, answerInitialRequest);
+    }
+
+    void Display::cancelAuthentication(QLocalSocket *socket) {
+        if (socket != m_socket && socket != m_pendingSocket)
+            return;
+
+        m_pendingAuthentication = false;
+        m_pendingSocket = nullptr;
+        m_pendingUser.clear();
+        m_pendingPassword.clear();
+        m_pendingInitialAuthRequest = false;
+
+        if (!m_auth->isActive())
+            return;
+
+        m_cancelingAuthentication = true;
+        m_socket = nullptr;
+        m_passPhrase.clear();
+        m_initialAuthRequest = false;
+        m_auth->stop();
+    }
+
+    void Display::authenticationResponse(QLocalSocket *socket, const QString &response) {
+        if (socket != m_socket || !m_auth->isActive()) {
+            qWarning() << "Ignoring authentication response without a matching active authentication";
             return;
         }
 
-        // authenticate
-        startAuth(user, password, session);
+        const auto prompts = m_auth->request()->prompts();
+        if (prompts.length() != 1) {
+            qWarning() << "Cannot apply authentication response: expected one prompt, got" << prompts.length();
+            return;
+        }
+
+        prompts[0]->setResponse(response.toUtf8());
+        m_auth->request()->done();
     }
 
     QString Display::findGreeterTheme() const {
@@ -385,7 +477,7 @@ namespace SDDM {
         return false;
     }
 
-    bool Display::startAuth(const QString &user, const QString &password, const Session &session) {
+    bool Display::startAuth(const QString &user, const QString &password, const Session &session, bool answerInitialRequest) {
 
         if (m_auth->isActive()) {
             qWarning() << "Existing authentication ongoing, aborting";
@@ -393,6 +485,8 @@ namespace SDDM {
         }
 
         m_passPhrase = password;
+        m_initialAuthRequest = answerInitialRequest;
+        m_cancelingAuthentication = false;
 
         // sanity check
         if (!session.isValid()) {
@@ -539,6 +633,13 @@ namespace SDDM {
     }
 
     void Display::slotHelperFinished(Auth::HelperExitStatus status) {
+        if (m_cancelingAuthentication) {
+            m_cancelingAuthentication = false;
+            if (m_pendingAuthentication)
+                startPendingAuthentication();
+            return;
+        }
+
         // Don't restart greeter and display server unless sddm-helper exited
         // with an internal error or the user session finished successfully,
         // we want to avoid greeter from restarting when an authentication
@@ -549,13 +650,31 @@ namespace SDDM {
     }
 
     void Display::slotRequestChanged() {
-        if (m_auth->request()->prompts().length() == 1) {
-            m_auth->request()->prompts()[0]->setResponse(qPrintable(m_passPhrase));
-            m_auth->request()->done();
-        } else if (m_auth->request()->prompts().length() == 2) {
-            m_auth->request()->prompts()[0]->setResponse(qPrintable(m_auth->user()));
-            m_auth->request()->prompts()[1]->setResponse(qPrintable(m_passPhrase));
-            m_auth->request()->done();
+        const auto prompts = m_auth->request()->prompts();
+
+        // Keep the existing behaviour for the initial request so unchanged
+        // greeter themes continue to work with ordinary password logins.
+        if (m_initialAuthRequest) {
+            m_initialAuthRequest = false;
+
+            if (prompts.length() == 1) {
+                prompts[0]->setResponse(qPrintable(m_passPhrase));
+                m_auth->request()->done();
+            } else if (prompts.length() == 2) {
+                prompts[0]->setResponse(qPrintable(m_auth->user()));
+                prompts[1]->setResponse(qPrintable(m_passPhrase));
+                m_auth->request()->done();
+            }
+            return;
+        }
+
+        // Subsequent requests must be answered by a greeter theme through
+        // sddm.respond().  PAM modules such as pam_google_authenticator use
+        // this for a separate one-time-password prompt.
+        if (prompts.length() == 1 && m_socket) {
+            m_socketServer->authenticationPrompt(m_socket, prompts[0]->message(), prompts[0]->hidden());
+        } else {
+            qWarning() << "Unsupported authentication request with" << prompts.length() << "prompts";
         }
     }
 

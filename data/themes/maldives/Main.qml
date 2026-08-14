@@ -34,6 +34,42 @@ Rectangle {
     LayoutMirroring.childrenInherit: true
 
     property int sessionIndex: session.index
+    property bool pamConversationActive: false
+    property string pamConversationUser: ""
+    property bool pamResponsePending: false
+    property string pamPendingResponse: ""
+
+    function beginPamAuthentication(username) {
+        if (!username) {
+            password.enabled = false
+            lblPassword.text = ""
+            return
+        }
+
+        pamConversationActive = true
+        pamConversationUser = username
+        password.enabled = false
+        password.text = ""
+        lblPassword.text = ""
+        pamResponsePending = false
+        pamPendingResponse = ""
+        sddm.beginAuthentication(username, sessionIndex)
+    }
+
+    function submitPamResponse() {
+        if (!pamConversationActive) {
+            beginPamAuthentication(name.text)
+        }
+
+        if (password.enabled) {
+            password.enabled = false
+            sddm.respond(password.text)
+            password.text = ""
+        } else {
+            pamPendingResponse = password.text
+            pamResponsePending = true
+        }
+    }
 
     TextConstants { id: textConstants }
 
@@ -44,10 +80,30 @@ Rectangle {
             errorMessage.color = "steelblue"
             errorMessage.text = textConstants.loginSucceeded
         }
+        function onAuthenticationPrompt(message, echoOn) {
+            lblPassword.text = message.trim().replace(/:\s*$/, "")
+            if (pamResponsePending) {
+                var response = pamPendingResponse
+                pamResponsePending = false
+                pamPendingResponse = ""
+                password.enabled = false
+                password.text = ""
+                sddm.respond(response)
+            } else {
+                password.enabled = true
+                password.text = ""
+                password.forceActiveFocus()
+            }
+        }
         function onLoginFailed() {
             password.text = ""
             errorMessage.color = "red"
             errorMessage.text = textConstants.loginFailed
+            pamConversationActive = false
+            pamConversationUser = ""
+            pamResponsePending = false
+            pamPendingResponse = ""
+            beginPamAuthentication(name.text)
         }
         function onInformationMessage(message) {
             errorMessage.color = "red"
@@ -127,7 +183,7 @@ Rectangle {
 
                         Keys.onPressed: function (event) {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                sddm.login(name.text, password.text, sessionIndex)
+                                beginPamAuthentication(name.text)
                                 event.accepted = true
                             }
                         }
@@ -149,12 +205,13 @@ Rectangle {
                         id: password
                         width: parent.width; height: 30
                         font.pixelSize: 14
+                        enabled: false
 
                         KeyNavigation.backtab: name; KeyNavigation.tab: session
 
                         Keys.onPressed: function (event) {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                sddm.login(name.text, password.text, sessionIndex)
+                                submitPamResponse()
                                 event.accepted = true
                             }
                         }
@@ -245,7 +302,7 @@ Rectangle {
                         text: textConstants.login
                         width: parent.btnWidth
 
-                        onClicked: sddm.login(name.text, password.text, sessionIndex)
+                        onClicked: submitPamResponse()
 
                         KeyNavigation.backtab: layoutBox; KeyNavigation.tab: shutdownButton
                     }
@@ -280,4 +337,7 @@ Rectangle {
         else
             password.focus = true
     }
+
+    Component.onCompleted: beginPamAuthentication(name.text)
+
 }
