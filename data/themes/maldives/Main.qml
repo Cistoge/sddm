@@ -190,6 +190,7 @@ Rectangle {
                                 pamPendingResponse = ""
                                 password.text = ""
                                 lblPassword.text = ""
+                                errorMessage.text = textConstants.prompt
                             }
 
                             password.enabled = text !== ""

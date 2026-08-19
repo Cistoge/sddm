@@ -514,6 +514,7 @@ Rectangle {
             pamPendingResponse = ""
             maya_password.text = ""
             maya_password_label.text = ""
+            prompt_txt.text = textConstants.prompt
           }
 
           maya_password.enabled = text !== ""
