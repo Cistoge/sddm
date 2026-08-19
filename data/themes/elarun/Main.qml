@@ -80,7 +80,7 @@ Rectangle {
         function onInformationMessage(message) {
             prompt_text.text = message
         }
-        function onAuthenticationPrompt(message, echoOn) {
+        function onAuthenticationPrompt(message, promptVisible) {
             prompt_text.text = message.trim().replace(/:\s*$/, "")
             if (pamResponsePending) {
                 var response = pamPendingResponse
@@ -101,7 +101,7 @@ Rectangle {
             pamConversationUser = ""
             pamResponsePending = false
             pamPendingResponse = ""
-            beginPamAuthentication(user_entry.text)
+            pw_entry.enabled = user_entry.text !== ""
         }
     }
 
@@ -175,6 +175,20 @@ Rectangle {
 
                             KeyNavigation.backtab: layoutBox; KeyNavigation.tab: pw_entry
 
+                            onTextChanged: {
+                                if (pamConversationActive && text !== pamConversationUser) {
+                                    sddm.cancelAuthentication()
+                                    pamConversationActive = false
+                                    pamConversationUser = ""
+                                    pamResponsePending = false
+                                    pamPendingResponse = ""
+                                    pw_entry.text = ""
+                                    prompt_text.text = ""
+                                }
+
+                                pw_entry.enabled = text !== ""
+                            }
+
                             Keys.onPressed: function (event) {
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                                     beginPamAuthentication(user_entry.text)
@@ -199,7 +213,12 @@ Rectangle {
 
                             KeyNavigation.backtab: user_entry; KeyNavigation.tab: login_button
 
-                            enabled: false
+                            enabled: user_entry.text !== ""
+
+                            onActiveFocusChanged: {
+                                if (activeFocus && user_entry.text !== "" && !pamConversationActive)
+                                    beginPamAuthentication(user_entry.text)
+                            }
 
                             Keys.onPressed: function (event) {
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -306,7 +325,6 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: beginPamAuthentication(user_entry.text)
 
     Rectangle {
         id: actionBar
@@ -371,9 +389,10 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        if (user_entry.text === "")
+        if (user_entry.text === "") {
             user_entry.focus = true
-        else
-            pw_entry.focus = true
+        } else {
+            beginPamAuthentication(user_entry.text)
+        }
     }
 }

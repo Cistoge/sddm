@@ -121,7 +121,7 @@ Rectangle {
 
       anim_success.start()
     }
-    function onAuthenticationPrompt(message, echoOn) {
+    function onAuthenticationPrompt(message, promptVisible) {
       maya_password_label.text = message.trim().replace(/:\s*$/, "")
       if (pamResponsePending) {
         var response = pamPendingResponse
@@ -143,7 +143,7 @@ Rectangle {
       pamConversationUser = ""
       pamResponsePending = false
       pamPendingResponse = ""
-      beginPamAuthentication(maya_username.text)
+      maya_password.enabled = maya_username.text !== ""
 
       maya_busy.visible = false;
       maya_busy_anim.stop()
@@ -504,6 +504,29 @@ Rectangle {
 
         KeyNavigation.tab     : maya_password
         KeyNavigation.backtab : maya_layout
+
+        onTextChanged: {
+          if (pamConversationActive && text !== pamConversationUser) {
+            sddm.cancelAuthentication()
+            pamConversationActive = false
+            pamConversationUser = ""
+            pamResponsePending = false
+            pamPendingResponse = ""
+            maya_password.text = ""
+            maya_password_label.text = ""
+          }
+
+          maya_password.enabled = text !== ""
+        }
+
+        Keys.onPressed: function (event) {
+          if ((event.key === Qt.Key_Return) || (event.key === Qt.Key_Enter)) {
+            if (maya_username.text !== "")
+              beginPamAuthentication(maya_username.text)
+
+            event.accepted = true;
+          }
+        }
       }
     }
 
@@ -537,7 +560,7 @@ Rectangle {
 
       PasswordBox {
         id      : maya_password
-        enabled : false
+        enabled : maya_username.text !== ""
 
         width   : parent.width
         height  : parent.height
@@ -561,9 +584,14 @@ Rectangle {
         KeyNavigation.tab     : maya_login
         KeyNavigation.backtab : maya_username
 
+        onActiveFocusChanged: {
+          if (activeFocus && maya_username.text !== "" && !pamConversationActive)
+            beginPamAuthentication(maya_username.text)
+        }
+
         Keys.onPressed: function (event) {
           if ((event.key === Qt.Key_Return) || (event.key === Qt.Key_Enter)) {
-            beginPamAuthentication(maya_username.text)
+            maya_root.tryLogin()
 
             event.accepted = true;
           }
@@ -736,12 +764,10 @@ Rectangle {
 
 
   Component.onCompleted: {
-    if (maya_username.text === "")
+    if (maya_username.text === "") {
       maya_username.focus = true
-    else
-      maya_password.focus = true
+    } else {
+      beginPamAuthentication(maya_username.text)
+    }
   }
-
-  Component.onCompleted: beginPamAuthentication(maya_username.text)
-
 }

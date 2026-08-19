@@ -80,7 +80,7 @@ Rectangle {
             errorMessage.color = "steelblue"
             errorMessage.text = textConstants.loginSucceeded
         }
-        function onAuthenticationPrompt(message, echoOn) {
+        function onAuthenticationPrompt(message, promptVisible) {
             lblPassword.text = message.trim().replace(/:\s*$/, "")
             if (pamResponsePending) {
                 var response = pamPendingResponse
@@ -103,7 +103,7 @@ Rectangle {
             pamConversationUser = ""
             pamResponsePending = false
             pamPendingResponse = ""
-            beginPamAuthentication(name.text)
+            password.enabled = name.text !== ""
         }
         function onInformationMessage(message) {
             errorMessage.color = "red"
@@ -181,6 +181,20 @@ Rectangle {
 
                         KeyNavigation.backtab: rebootButton; KeyNavigation.tab: password
 
+                        onTextChanged: {
+                            if (pamConversationActive && text !== pamConversationUser) {
+                                sddm.cancelAuthentication()
+                                pamConversationActive = false
+                                pamConversationUser = ""
+                                pamResponsePending = false
+                                pamPendingResponse = ""
+                                password.text = ""
+                                lblPassword.text = ""
+                            }
+
+                            password.enabled = text !== ""
+                        }
+
                         Keys.onPressed: function (event) {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                                 beginPamAuthentication(name.text)
@@ -205,9 +219,14 @@ Rectangle {
                         id: password
                         width: parent.width; height: 30
                         font.pixelSize: 14
-                        enabled: false
+                        enabled: name.text !== ""
 
                         KeyNavigation.backtab: name; KeyNavigation.tab: session
+
+                        onActiveFocusChanged: {
+                            if (activeFocus && name.text !== "" && !pamConversationActive)
+                                beginPamAuthentication(name.text)
+                        }
 
                         Keys.onPressed: function (event) {
                             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -332,12 +351,11 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        if (name.text == "")
+        if (name.text == "") {
             name.focus = true
-        else
-            password.focus = true
+        } else {
+            beginPamAuthentication(name.text)
+        }
     }
-
-    Component.onCompleted: beginPamAuthentication(name.text)
 
 }
