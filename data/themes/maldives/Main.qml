@@ -106,7 +106,7 @@ Rectangle {
             password.enabled = name.text !== ""
         }
         function onInformationMessage(message) {
-            errorMessage.color = "red"
+            errorMessage.color = "white"
             errorMessage.text = message
         }
     }
@@ -190,6 +190,7 @@ Rectangle {
                                 pamPendingResponse = ""
                                 password.text = ""
                                 lblPassword.text = ""
+                                errorMessage.color = "white"
                                 errorMessage.text = textConstants.prompt
                             }
 

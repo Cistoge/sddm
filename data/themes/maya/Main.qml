@@ -151,7 +151,7 @@ Rectangle {
       anim_failure.start()
     }
     function onInformationMessage(message) {
-      prompt_bg.color = failureText
+      prompt_bg.color = "transparent"
       prompt_txt.text = message
 
       maya_busy.visible = false;
@@ -514,6 +514,7 @@ Rectangle {
             pamPendingResponse = ""
             maya_password.text = ""
             maya_password_label.text = ""
+            prompt_bg.color = "transparent"
             prompt_txt.text = textConstants.prompt
           }
 
@@ -758,6 +759,7 @@ Rectangle {
 
       onStopped: {
         maya_password.text  = ""
+        prompt_bg.color     = "transparent"
         prompt_txt.text     = textConstants.prompt
       }
     }
