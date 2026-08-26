@@ -336,6 +336,10 @@ Rectangle {
 
         model   : sessionModel
         index   : sessionModel.lastIndex
+        onIndexChanged: {
+          if (pamConversationActive)
+            sddm.setSession(index)
+        }
 
         width   : spUnit * 3
         height  : parent.height

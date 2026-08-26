@@ -155,6 +155,7 @@ namespace SDDM {
         // connect login signal
         connect(m_socketServer, &SocketServer::login, this, &Display::login);
         connect(m_socketServer, &SocketServer::beginAuthentication, this, QOverload<QLocalSocket *, const QString &, const Session &>::of(&Display::beginAuthentication));
+        connect(m_socketServer, &SocketServer::setSession, this, &Display::setAuthenticationSession);
         connect(m_socketServer, &SocketServer::cancelAuthentication, this, &Display::cancelAuthentication);
         connect(m_socketServer, &SocketServer::authenticationResponse, this, &Display::authenticationResponse);
 
@@ -400,6 +401,21 @@ namespace SDDM {
         return beginAuthentication(socket, user, password, session, answerInitialRequest);
     }
 
+    void Display::setAuthenticationSession(QLocalSocket *socket, const Session &session) {
+        if (socket == m_socket && m_auth->isActive()) {
+            if (!session.isValid()) {
+                qWarning() << "Ignoring invalid session change" << session.fileName();
+                return;
+            }
+            m_authenticationSession = session;
+            m_sessionName = session.fileName();
+            return;
+        }
+
+        if (socket == m_pendingSocket && m_pendingAuthentication)
+            m_pendingSession = session;
+    }
+
     void Display::cancelAuthentication(QLocalSocket *socket) {
         if (socket != m_socket && socket != m_pendingSocket)
             return;
@@ -488,7 +504,46 @@ namespace SDDM {
         m_initialAuthRequest = answerInitialRequest;
         m_cancelingAuthentication = false;
 
-        // sanity check
+        // Validate the initial selection. It remains changeable while the PAM
+        // conversation is active and is prepared only after authentication
+        // succeeds.
+        if (!session.isValid()) {
+            qCritical() << "Invalid session" << session.fileName();
+            return false;
+        }
+
+        m_authenticationSession = session;
+        m_sessionName = session.fileName();
+        m_auth->setSession(QString());
+        m_auth->setDisplayServerCommand(QString());
+
+        m_reuseSessionId = QString();
+
+        if (Logind::isAvailable() && mainConfig.Users.ReuseSession.get()) {
+            OrgFreedesktopLogin1ManagerInterface manager(Logind::serviceName(), Logind::managerPath(), QDBusConnection::systemBus());
+            auto reply = manager.ListSessions();
+            reply.waitForFinished();
+
+            for (const SessionInfo &s : reply.value()) {
+                if (s.userName == user) {
+                    OrgFreedesktopLogin1SessionInterface loginSession(Logind::serviceName(), s.sessionPath.path(), QDBusConnection::systemBus());
+                    if ((loginSession.service() == QLatin1String("sddm")
+                        || loginSession.service() == QLatin1String("sddm-autologin"))
+                            && loginSession.state() == QLatin1String("online")) {
+                        m_reuseSessionId = s.sessionId;
+                        break;
+                    }
+                }
+            }
+        }
+
+        m_auth->setUser(user);
+        m_auth->start();
+
+        return true;
+    }
+
+    bool Display::configureUserSession(const Session &session) {
         if (!session.isValid()) {
             qCritical() << "Invalid session" << session.fileName();
             return false;
@@ -502,40 +557,15 @@ namespace SDDM {
             return false;
         }
 
-        m_reuseSessionId = QString();
-
-        if (Logind::isAvailable() && mainConfig.Users.ReuseSession.get()) {
-            OrgFreedesktopLogin1ManagerInterface manager(Logind::serviceName(), Logind::managerPath(), QDBusConnection::systemBus());
-            auto reply = manager.ListSessions();
-            reply.waitForFinished();
-
-            const auto info = reply.value();
-            for(const SessionInfo &s : reply.value()) {
-                if (s.userName == user) {
-                    OrgFreedesktopLogin1SessionInterface session(Logind::serviceName(), s.sessionPath.path(), QDBusConnection::systemBus());
-                    if ((session.service() == QLatin1String("sddm")
-                        || session.service() == QLatin1String("sddm-autologin"))
-                            && session.state() == QLatin1String("online")) {
-                        m_reuseSessionId = s.sessionId;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // save session desktop file name, we'll use it to set the
-        // last session later, in slotAuthenticationFinished()
         m_sessionName = session.fileName();
 
         m_sessionTerminalId = m_terminalId;
         if ((session.type() == Session::WaylandSession && m_displayServerType == X11DisplayServerType) || (m_greeter->isRunning() && m_displayServerType != X11DisplayServerType)) {
             // Create a new VT when we need to have another compositor running
-            if (seat()->canTTY()) {
+            if (seat()->canTTY())
                 m_sessionTerminalId = VirtualTerminal::setUpNewVt();
-            }
         }
 
-        // some information
         qDebug() << "Session" << m_sessionName << "selected, command:" << session.exec() << "for VT" << m_sessionTerminalId;
 
         QProcessEnvironment env;
@@ -556,21 +586,16 @@ namespace SDDM {
         env.insert(QStringLiteral("XDG_SESSION_DESKTOP"), session.desktopNames());
 #endif
 
+        m_auth->setDisplayServerCommand(QString());
         if (session.xdgSessionType() == QLatin1String("x11")) {
-          if (m_displayServerType == X11DisplayServerType)
-            env.insert(QStringLiteral("DISPLAY"), name());
-          else
-            m_auth->setDisplayServerCommand(XorgUserDisplayServer::command(this));
-        } else {
-            m_auth->setDisplayServerCommand(QStringLiteral());
-	}
-        m_auth->setUser(user);
-        if (m_reuseSessionId.isNull()) {
-            m_auth->setSession(session.exec());
+            if (m_displayServerType == X11DisplayServerType)
+                env.insert(QStringLiteral("DISPLAY"), name());
+            else
+                m_auth->setDisplayServerCommand(XorgUserDisplayServer::command(this));
         }
-        m_auth->insertEnvironment(env);
-        m_auth->start();
 
+        m_auth->setSession(session.exec());
+        m_auth->insertEnvironment(env);
         return true;
     }
 
@@ -582,6 +607,13 @@ namespace SDDM {
 
         if (success) {
             qDebug() << "Authentication for user " << user << " successful";
+
+            if (m_reuseSessionId.isNull() && !configureUserSession(m_authenticationSession)) {
+                if (m_socket)
+                    emit loginFailed(m_socket);
+                m_socket = nullptr;
+                return;
+            }
 
             if (!m_reuseSessionId.isNull()) {
                 OrgFreedesktopLogin1ManagerInterface manager(Logind::serviceName(), Logind::managerPath(), QDBusConnection::systemBus());

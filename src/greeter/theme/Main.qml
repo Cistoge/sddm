@@ -295,6 +295,10 @@ Rectangle {
 
                     model: sessionModel
                     index: sessionModel.lastIndex
+                    onIndexChanged: {
+                        if (pamConversationActive)
+                            sddm.setSession(index)
+                    }
 
                     font.pixelSize: 14
 

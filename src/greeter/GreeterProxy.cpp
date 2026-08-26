@@ -140,6 +140,19 @@ namespace SDDM {
         SocketWriter(d->socket) << quint32(GreeterMessages::BeginAuthentication) << user << session;
     }
 
+    void GreeterProxy::setSession(const int sessionIndex) const {
+        if (!d->sessionModel) {
+            qCritical() << "Session model is not set.";
+            return;
+        }
+
+        const QModelIndex index = d->sessionModel->index(sessionIndex, 0);
+        const Session::Type type = static_cast<Session::Type>(d->sessionModel->data(index, SessionModel::TypeRole).toInt());
+        const QString name = d->sessionModel->data(index, SessionModel::FileRole).toString();
+        const Session session(type, name);
+        SocketWriter(d->socket) << quint32(GreeterMessages::SetSession) << session;
+    }
+
     void GreeterProxy::cancelAuthentication() const {
         SocketWriter(d->socket) << quint32(GreeterMessages::CancelAuthentication);
     }

@@ -73,6 +73,7 @@ namespace SDDM {
                    const QString &user, const QString &password,
                    const Session &session);
         void beginAuthentication(QLocalSocket *socket, const QString &user, const Session &session);
+        void setAuthenticationSession(QLocalSocket *socket, const Session &session);
         void cancelAuthentication(QLocalSocket *socket);
         void authenticationResponse(QLocalSocket *socket, const QString &response);
         void displayServerStarted();
@@ -94,6 +95,7 @@ namespace SDDM {
                                  const QString &password, const Session &session,
                                  bool answerInitialRequest);
         bool startPendingAuthentication();
+        bool configureUserSession(const Session &session);
 
         void startSocketServerAndGreeter();
         bool handleAutologinFailure();
@@ -114,6 +116,7 @@ namespace SDDM {
         QString m_pendingPassword;
         Session m_pendingSession;
         bool m_pendingInitialAuthRequest { false };
+        Session m_authenticationSession;
         QString m_sessionName;
         QString m_reuseSessionId;
 

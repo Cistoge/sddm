@@ -64,6 +64,7 @@ namespace SDDM {
 
         void login(const QString &user, const QString &password, const int sessionIndex) const;
         void beginAuthentication(const QString &user, const int sessionIndex) const;
+        void setSession(const int sessionIndex) const;
         void cancelAuthentication() const;
         void respond(const QString &response) const;
 

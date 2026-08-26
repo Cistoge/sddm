@@ -268,6 +268,10 @@ Rectangle {
 
                             model: sessionModel
                             index: sessionModel.lastIndex
+                            onIndexChanged: {
+                                if (pamConversationActive)
+                                    sddm.setSession(index)
+                            }
 
                             KeyNavigation.backtab: password; KeyNavigation.tab: layoutBox
                         }

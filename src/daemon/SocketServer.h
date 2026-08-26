@@ -57,6 +57,7 @@ namespace SDDM {
                    const Session &session);
         void authenticationResponse(QLocalSocket *socket, const QString &response);
         void beginAuthentication(QLocalSocket *socket, const QString &user, const Session &session);
+        void setSession(QLocalSocket *socket, const Session &session);
         void cancelAuthentication(QLocalSocket *socket);
         void connected();
 

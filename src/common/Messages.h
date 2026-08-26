@@ -33,6 +33,7 @@ namespace SDDM {
         HybridSleep,
         AuthenticationResponse,
         BeginAuthentication,
+        SetSession,
         CancelAuthentication
     };
 

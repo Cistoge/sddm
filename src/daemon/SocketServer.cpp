@@ -161,6 +161,14 @@ namespace SDDM {
                     emit beginAuthentication(socket, user, session);
                 }
                 break;
+                case GreeterMessages::SetSession: {
+                    qDebug() << "Message received from greeter: SetSession";
+
+                    Session session;
+                    input >> session;
+                    emit setSession(socket, session);
+                }
+                break;
                 case GreeterMessages::CancelAuthentication: {
                     qDebug() << "Message received from greeter: CancelAuthentication";
                     emit cancelAuthentication(socket);
